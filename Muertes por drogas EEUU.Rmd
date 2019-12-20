@@ -1,0 +1,267 @@
+---
+title: MUERTES POR DROGAS EN EEUU
+author: Clara Monera y Lucía Montero
+date: "`r Sys.Date()`"  
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+    highlight: github
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+# INTRODUCCIÓN 
+
+Con este trabajo queremos mostrar el impacto que tiene el consumo de drogas sobre EEUU. Hemos **seleccionado dos bases de datos**; una cuyo contenido es el **nº de muertes segregado por estados en EEUU** con información adicional como el nivel de paro y el PIB y otra con datos a nivel mundial de la **media de muertes según cinco rangos de edad**. 
+
+Con todo esto nuestro principal objetivo ha sido estudiar en qué estados ha habido un mayor número de muertes por drogas e intentar dilucidar si tiene correlación con alguna variable macroeconómica. 
+
+Además, también hemos hecho una comparativa de la evolución de los 8 estados con mayo número de muertes desde 1999 hasta 2016.
+
+
+```{r, echo = FALSE}
+#install.packages("rmdformats")
+#install.packages("tufte")
+#install.packages("rticles", type = "source")
+#install.packages("prettydoc")
+#install.packages("rainbow.colors")
+#devtools::install_github("ropenscilabs/icon")
+library(rmdformats)
+library(tidyverse)
+library (ggplot2)
+library(extrafont)
+library(gridExtra)
+library(sf)
+library("rnaturalearth")
+library("rnaturalearthdata")
+library(rgeos)
+library(ggplot2)
+library(gganimate)
+library(gifski)
+library(hrbrthemes)
+library(ggThemeAssist)
+library(kableExtra)
+library(ggplot2)
+
+df <- read_csv("DATA/deaths-due-to-illicit-drug-use-by-age.csv")
+
+df1 <- read_csv("DATA/drug_abuse_data.csv")
+```
+
+## Muertes por consumo de drogas en cada estado
+
+ 
+En este gráfico queremos mostrar por una parte cuales son los estados donde se producen más muertes por drogas en valor absoluto y por otra parte, cuales son los estados con más muertes por drogas en porcentaje. Ambos tomando el año 2016 como año de referencia.
+
+Es muy interesante poder observar como hay un gran cambio de uno a otro; mientras con valor absoluto se posiciona California como el estado con más muertes por drogas en América, si lo estudiamos como porcentage de la población total del estado, cosa que creemos más conveniente ya que se acerca más a la realidad, Ohio, que anteriormente estaba en cuarta posición, pasa a ser el estado con más muertes en relación a la población total.
+
+```{r , echo = FALSE}
+df2 <- df1 %>% filter(year==2016) %>% select(year, state, drug_deaths, population) %>%
+  mutate(percent = (drug_deaths/population)*100) %>% top_n(20, drug_deaths)
+
+df3 <- df2 %>% top_n(20, percent)
+
+```
+
+
+```{r,echo=FALSE, eval=TRUE}
+
+p1 <- ggplot(df2, aes(x = reorder(state,drug_deaths), y = drug_deaths)) +
+  geom_col(fill="darkslategray3")+
+  coord_flip()  +
+  labs(subtitle = "En Valor absoluto") +
+  theme_minimal(base_size = 13) +
+  theme(axis.title.x=element_blank(), axis.title.y =element_blank())  +
+  theme (axis.text.y=element_text(size=rel(1), color="gray21", face="bold"))+
+  theme (axis.text.x =element_text(size=rel(1), color="gray21", face="bold"))+
+  theme (plot.subtitle=element_text(size=rel(1), color="gray21", face="bold"))
+
+
+p2 <- ggplot(df3, aes(x = reorder(state, percent), y = percent)) +
+  geom_col(fill="deeppink4") +
+  coord_flip()  +
+  labs(subtitle = "En porcentaje") +
+  theme_minimal(base_size = 13) +
+  theme(axis.title.x=element_blank(), axis.title.y =element_blank())  +
+  theme (axis.text.y=element_text(size=rel(1), color="gray21", face="bold"))+
+  theme (axis.text.x =element_text(size=rel(1), color="gray21", face="bold"))+
+  theme (plot.subtitle=element_text(size=rel(1), color="gray21", face="bold"))
+
+
+grid.arrange(p1,p2,ncol = 2, widths = c(5, 5))
+
+```
+
+--------------------------
+
+## Porcentaje de muertes según la población y variables macroeconómicas
+
+La tabla muestra para el año 2016 cuales son los estados que tienen un porcentaje mayor de muertes por drogas según la población total.  Nos ha parecido una manera visual de ver como cambia el número de muertes, el porcentage sobre la población total y analizarlo según la variable desempleo.
+
+Podemos corroborar que aquellos estados, por lo general, que más muertes por drogoadicción sufren son los que, paralelamente, tienen índices de paro superiores a la media. 
+
+```{r df, echo = FALSE, eval = TRUE}
+
+df_tt_1 <- df1 %>% filter(year==2016) %>% select(state, drug_deaths,unemployment, unemployment_rate, population) %>%
+mutate(percent = (drug_deaths/population)*100) %>% arrange(desc(percent))
+
+knitr :: kable(df_tt_1, format = "html") %>%  kableExtra::kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+kableExtra::kable_styling(fixed_thead = list(enabled = T, background ="purple", enabled=T))%>%
+row_spec(1:2, bold = T)%>%row_spec(15, bold = T)%>%row_spec(31, bold = T)
+
+
+```
+
+
+## Muertes por grupos de edad y por país
+
+Para este apartado hemos establecido la geometría del mapa del mundo, quitando la Antartida y Groenlandia, para seguidamente unir estos datos con nuestro *dataframe* y filtrando por los valores para el año 2017.
+
+De esta forma conseguimos que cada país quede establecido en el mapa. Seguidamente hemos graficado según los cuatro grupos de edad convirtiendo la variable de cada grupo a factor para luego dividirla entre seis grupos. Explicamos paso a paso la elaboración del gráfico:
+
+  - Utilizamos los paquetes `"rnaturalearth"` y `"rnaturalearthdata"` para hacer el *mapamundi*
+  
+```{r, echo=FALSE, eval=FALSE}
+
+world <- ne_countries(returnclass = "sf")
+world <- world %>% filter(subregion != "Antarctica") %>% filter(admin != "Greenland")
+ggplot() + geom_sf(data = world) + theme_void()
+world <- world %>% select( iso_a3, geometry)
+
+df <- df %>% filter(Year==2017)
+df_world <- left_join(df, world, by = c("Code"="iso_a3"))
+
+```
+
+ - Unimos las tablas world y df:
+
+
+```{r, echo=TRUE, eval=FALSE}
+
+df <- df %>% filter(Year==2017)
+df_world <- left_join(df, world, by = c("Code"="iso_a3"))
+
+
+```
+
+- Procedemos a crear los cuatro gráficos por separado para seguidamente unirlos:
+  
+```{r, echo=TRUE, eval=FALSE}
+
+df_world <- df_world %>% mutate(muerte70_6 = as_factor(ntile(`70 and older (deaths)`, 6)))
+df_world <- df_world %>% mutate(muerte70_6 = ntile(`70 and older (deaths)`, 6))
+
+
+A <- ggplot() + geom_sf(data= df_world, aes(geometry=geometry, fill=muerte70_6)) +
+  ggtitle("Muertes en mayores de 70 años")  +
+theme(plot.subtitle = element_text(vjust = 1), plot.caption = element_text(vjust = 1)) 
+
+```
+  
+- Los unimos con la función `grid.arrange`:
+
+  
+```{r, echo=FALSE, eval=TRUE}
+
+world <- ne_countries(returnclass = "sf")
+world <- world %>% filter(subregion != "Antarctica") %>% filter(admin != "Greenland")
+world <- world %>% select( iso_a3, geometry)
+
+df <- df %>% filter(Year==2017)
+df_world <- left_join(df, world, by = c("Code"="iso_a3"))
+
+
+df_world <- df_world %>% mutate(muerte70_6 = as_factor(ntile(`70 and older (deaths)`, 6)))
+df_world <- df_world %>% mutate(muerte70_6 = ntile(`70 and older (deaths)`, 6))
+
+
+A <- ggplot(data= df_world, aes(geometry=geometry, fill=muerte70_6)) + geom_sf(color = "white", lwd = 0.2) +
+  ggtitle("Muertes en mayores de 70 años") + theme(plot.subtitle = element_text(vjust = 1), plot.caption = element_text(vjust = 1)) +
+  labs(fill = NULL) + theme(panel.background = element_rect(fill = NA))
+
+
+df_world <- df_world %>% mutate(muerte50_6 = as_factor(ntile(`50-69 years (deaths)`, 6)))
+df_world <- df_world %>% mutate(muerte50_6 = ntile(`50-69 years (deaths)`, 6))
+
+
+B <-ggplot(data= df_world, aes(geometry=geometry, fill=muerte50_6)) + geom_sf(color = "white", lwd = 0.2) +
+  scale_fill_viridis_c(option = "cividis", trans = "sqrt") +
+  ggtitle("Muertes de 50 a 69 años") + theme(plot.subtitle = element_text(vjust = 1), plot.caption = element_text(vjust = 1)) +
+  labs(fill = NULL) + theme(panel.background = element_rect(fill = NA))
+
+
+df_world <- df_world %>% mutate(muerte15_6 = as_factor(ntile(`15-49 years (deaths)`, 6)))
+df_world <- df_world %>% mutate(muerte15_6 = ntile(`15-49 years (deaths)`, 6))
+
+
+C <- ggplot(data= df_world, aes(geometry=geometry, fill=muerte15_6)) + geom_sf(color = "white", lwd = 0.2) +
+  scale_fill_viridis_c(option = "plasma", trans = "sqrt") +
+  ggtitle("Muertes de 15 a 49 años") + theme(plot.subtitle = element_text(vjust = 1),plot.caption = element_text(vjust = 1)) +
+  labs(fill = NULL) + theme(panel.background = element_rect(fill = NA))
+
+df_world <- df_world %>% mutate(muerte5_6 = as_factor(ntile(`5-14 year (deaths)`, 6)))
+df_world <- df_world %>% mutate(muerte5_6 = ntile(`5-14 year (deaths)`,6))
+
+
+D <- ggplot(data= df_world, aes(geometry=geometry, fill=muerte5_6)) + geom_sf(color = "white", lwd = 0.2) +
+  scale_fill_viridis_c(option = "rainbow", trans = "sqrt") +
+  ggtitle("Muertes de 5 a 14 años")  +  theme(plot.subtitle = element_text(vjust = 1),plot.caption = element_text(vjust = 1)) +
+  labs(fill = NULL) + theme(panel.background = element_rect(fill = NA))
+
+grid.arrange(A,B,C,D,ncol = 2, nrow= 2,widths = c(5, 5))
+
+```
+
+
+------------------------------------
+
+
+## Evolución en el tiempo de las muertes por drogas en Estados Unidos
+
+Para finaizar nuestro análisis, hemos visto conveniente mostrar la evolución de los 8 estados que registran más muertes por drogoadicción desde 1999 hasta 2016.
+
+Como veníamos viendo, podemos concluir que California es el estado que más murtes registra prácticamente desde el año que disponemos datos. Pese a que algún año ha descendido, nunca ha conseguido quedar por debajo del *top 8* de estados con más muertes. Si que podemos observar que algunos, como New Yersey, que en el año 1999 y 2000 registra un alto número de muertes pero a partir del año 2000 desaparece en combate y no vuelve a tener ningún pico.
+
+
+```{r, echo=TRUE, eval=TRUE}
+PLOT <- df1 %>% group_by(state, year)%>% select(drug_deaths, state,year)
+
+PLOT <- PLOT %>%arrange(desc(drug_deaths))%>% arrange(desc(year))
+
+PLOT <-  PLOT %>% group_by(year)%>%top_n(8, drug_deaths) 
+
+
+myPlot <-PLOT %>%
+  ggplot( aes(x=year, y=drug_deaths, group=state, color=state)) +
+  geom_line() + scale_color_manual(values = c("darkred","darkgreen","darkorange1", "gray35","seagreen2", "coral","darkolivegreen2", "chocolate4","hotpink", "yellow1", "springgreen", "darkred","palevioletred4","navyblue","chocolate4","seagreen2")) +
+  geom_point(size=1.5)  + theme_ipsum()+
+  ggtitle("Evolución de las muertes en EUA") +     
+  theme(plot.title = element_text(size=14))+
+  transition_reveal(year)
+
+
+animate(myPlot, renderer = gifski_renderer())
+```
+
+-------------------------------------
+
+<style>
+div.blue { background-color:#e6f0ff; border-radius: 5px; padding: 20px;}
+</style>
+<div class = "blue">
+
+# CONCLUSIÓN
+
+Para finalizar el trabajo nos gustaría plasmar las conclusiones que hemos sacado:
+
+1. **Primero**: Resaltamos el hecho de que difiera el análisis según tomemos en consideración las muertes en valor absoluto o como porcentage de la población.
+
+2. **Segundo**: Hemos encontrado relación entre el nivel de paro del estado y la muerte por drogoadicción.
+
+3. **Tercero**: Por lo general, aquellos países que registran un alto número de muertes suelen mantenerlo con los años y no ser un hecho puntual.
+
+</div>
